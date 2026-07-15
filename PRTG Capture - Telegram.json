@@ -1,0 +1,114 @@
+{
+  "name": "PRTG Capture - Telegram",
+  "nodes": [
+    {
+      "parameters": {
+        "url": "http://host.docker.internal:8080/capture?window=Remote%20Desktop%20Manager",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "43990b1c-0fd3-4084-8d73-d4974347cf69",
+      "name": "Capturar ventana PRTG",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2416,
+        432
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "sendPhoto",
+        "chatId": "6641509908",
+        "binaryData": true,
+        "additionalFields": {}
+      },
+      "id": "f22e7f37-9321-4e68-9f94-876f1ecb6072",
+      "name": "Enviar a Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2640,
+        432
+      ],
+      "webhookId": "5a5fcc23-b4a5-4c02-ae38-367d31ec7657",
+      "alwaysOutputData": false,
+      "credentials": {
+        "telegramApi": {
+          "id": "27mEBlxhpCDwtYKc",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 2
+            }
+          ]
+        }
+      },
+      "id": "39854a12-bff1-430f-b7e5-0ce9d185a9a6",
+      "name": "cada min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        2192,
+        432
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Capturar ventana PRTG": {
+      "main": [
+        [
+          {
+            "node": "Enviar a Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "cada min": {
+      "main": [
+        [
+          {
+            "node": "Capturar ventana PRTG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "7dfb9306-da3e-4a4b-8c3a-344491349f22",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "208605b15874fff69164c8726212094fe55754aa71bb060dd73ca8bc69e50bde"
+  },
+  "id": "OCrNPqqz9E6ZCWTa",
+  "tags": [
+    {
+      "updatedAt": "2026-07-15T19:11:36.000Z",
+      "createdAt": "2026-07-15T19:11:36.000Z",
+      "id": "vYLESlhzFdOFLQEf",
+      "name": "PRTG"
+    }
+  ]
+}

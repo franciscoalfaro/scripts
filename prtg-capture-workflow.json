@@ -1,0 +1,92 @@
+{
+  "name": "PRTG Capture - Telegram",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Cada 30 minutos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "url": "http://host.docker.internal:8080/capture?window=Remote%20Desktop%20Manager",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "http-capture",
+      "name": "Capturar ventana PRTG",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "resource": "photo",
+        "chatId": "6641509908",
+        "additionalFields": {
+          "caption": "Captura PRTG - {{ $now.format('dd/MM/yyyy HH:mm') }}"
+        }
+      },
+      "id": "send-telegram",
+      "name": "Enviar a Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [440, 0],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZAR_CON_ID_CREDENCIAL",
+          "name": "Telegram Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cada 30 minutos": {
+      "main": [
+        [
+          {
+            "node": "Capturar ventana PRTG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Capturar ventana PRTG": {
+      "main": [
+        [
+          {
+            "node": "Enviar a Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "PRTG"
+    }
+  ]
+}
