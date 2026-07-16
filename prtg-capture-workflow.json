@@ -20,7 +20,7 @@
     },
     {
       "parameters": {
-        "url": "http://host.docker.internal:8080/capture?window=Remote%20Desktop%20Manager",
+        "url": "http://host.docker.internal:8080/capture",
         "options": {
           "response": {
             "response": {

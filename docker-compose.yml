@@ -1,0 +1,10 @@
+services:
+  prtg-capture:
+    build: .
+    container_name: prtg-capture
+    ports:
+      - "8080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file: .env
+    restart: unless-stopped

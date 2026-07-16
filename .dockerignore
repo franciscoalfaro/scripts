@@ -1,0 +1,11 @@
+README.md
+SETUP-TELEGRAM.md
+*.ps1
+*.json
+!requirements.txt
+.git
+.gitignore
+test_capture.py
+.env.example
+Dockerfile
+docker-compose.yml

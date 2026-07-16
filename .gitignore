@@ -1,0 +1,5 @@
+.env
+test-capture.png
+test-capture-*.png
+__pycache__/
+*.pyc

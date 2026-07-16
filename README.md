@@ -1,105 +1,135 @@
 # PRTG Capture → Telegram
 
-Sistema que captura periódicamente la ventana de PRTG (visible a través de
-Remote Desktop Manager en un segundo monitor) y la envía por Telegram.
+Sistema que captura periódicamente la página de sensores de PRTG
+usando Chromium headless (Playwright) y la envía por Telegram.
 
 ## Arquitectura
 
 ```
-┌─────────────────────────────────────────────┐
-│  Windows (equipo local)                     │
-│                                             │
-│  capture-server.py (:8080)                  │
-│    GET /capture → screenshot → PNG          │
-│                                             │
-│  n8n (Docker)                               │
-│    Cron → HTTP Request → Telegram Bot       │
-└─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│  VM (Docker Linux)                               │
+│                                                  │
+│  prtg-capture (:8080)   ← Chromium headless      │
+│    GET /capture → screenshot PRTG → PNG          │
+│                                                  │
+│  n8n (:5678)            ← Docker (separado)      │
+│    Cron → HTTP Request → Telegram Bot            │
+└──────────────────────────────────────────────────┘
          │
          ▼ Telegram
-    📱 Screenshot cada 30 min
+    Screenshot cada 30 min
 ```
 
 ## Requisitos
 
-- Windows 10/11
-- Python 3.10+ con pip
-- Docker Desktop con n8n
-- Bot de Telegram
+- Docker Desktop o Docker Engine en Linux
+- Acceso a la URL de PRTG desde la VM
+- Bot de Telegram (ver `SETUP-TELEGRAM.md`)
 
 ## Archivos
 
-| Archivo | Descripción |
+| Archivo | Descripcion |
 |---------|-------------|
-| `capture-server.py` | Servidor HTTP que toma screenshots |
-| `capture-window.ps1` | Script PowerShell alternativo (opcional) |
+| `capture-server.py` | Servidor HTTP con Playwright (Chromium headless) |
+| `Dockerfile` | Imagen Linux + Python + Chromium |
+| `docker-compose.yml` | Orquestacion del servicio |
+| `.env` / `.env.example` | Configuracion y credenciales de PRTG |
+| `requirements.txt` | Dependencias Python |
 | `prtg-capture-workflow.json` | Workflow para importar en n8n |
-| `SETUP-TELEGRAM.md` | Guía para crear el Bot de Telegram |
+| `SETUP-TELEGRAM.md` | Guia para crear el Bot de Telegram |
 
 ---
 
-## Paso 1: Instalar dependencias de Python
+## Paso 1: Configurar credenciales
 
-```powershell
-pip install Pillow pywin32 mss
+Copiar el archivo de ejemplo y llenar con las credenciales de PRTG:
+
+```bash
+cp .env.example .env
 ```
 
-## Paso 2: Crear Bot de Telegram
+Editar `.env`:
 
-Ver `SETUP-TELEGRAM.md` para instrucciones detalladas.
-
-Resumen:
-1. Buscar **@BotFather** en Telegram
-2. Enviar `/newbot` → elegir nombre y username
-3. Copiar **Bot Token**
-4. Enviar un mensaje al bot
-5. Abrir `https://api.telegram.org/bot<TOKEN>/getUpdates`
-6. Copiar el `chat.id`
-
-## Paso 3: Iniciar servidor de captura
-
-```powershell
-python C:\scripts\capture-server.py
+```env
+PRTG_URL=https://186.10.70.44/sensors.htm?id=0&filter_status=5
+PRTG_LOGIN_URL=https://186.10.70.44/index.htm
+PRTG_USER=tu_usuario
+PRTG_PASS=tu_password
+SERVER_PORT=8080
+SCREENSHOT_WIDTH=1920
+SCREENSHOT_HEIGHT=1080
 ```
 
-Verificar que funcione:
-```
-http://localhost:8080/health
-http://localhost:8080/capture?window=Remote%20Desktop%20Manager
+Si PRTG no requiere login, dejar `PRTG_USER` y `PRTG_PASS` vacios.
+
+## Paso 2: Levantar contenedor
+
+```bash
+docker compose up -d --build
 ```
 
-El servidor debe estar corriendo siempre que se quieran enviar capturas.
+Verificar que este corriendo:
+
+```bash
+docker ps --filter name=prtg-capture
+```
+
+## Paso 3: Verificar que funciona
+
+```bash
+# Health check
+curl http://localhost:8080/health
+
+# Captura de prueba
+curl -o test.png http://localhost:8080/capture
+
+# Abrir test.png para verificar la imagen
+```
+
+Endpoints disponibles:
+
+| Endpoint | Metodo | Descripcion |
+|----------|--------|-------------|
+| `/capture` | GET | Captura full page de PRTG, devuelve PNG |
+| `/capture?url=<otra_url>` | GET | Captura una URL especifica |
+| `/health` | GET | Health check, retorna `OK` |
 
 ## Paso 4: Importar workflow en n8n
 
 1. Abrir `http://localhost:5678`
-2. **New Workflow** → **Import from File** → `prtg-capture-workflow.json`
-3. **Settings → Credentials → New** → **Telegram API** → pegar Bot Token
-4. Abrir nodo **"Enviar a Telegram"** → seleccionar la credencial creada
+2. **New Workflow** > **Import from File** > `prtg-capture-workflow.json`
+3. **Settings > Credentials > New** > **Telegram API** > pegar Bot Token
+4. Abrir nodo **"Enviar a Telegram"** > seleccionar la credencial creada
 5. Hacer clic en **"Execute Workflow"** para probar manualmente
-6. **Activar** el workflow para que corra automáticamente cada 30 minutos
+6. **Activar** el workflow para que corra automaticamente cada 30 minutos
 
-## Paso 5: Ejecutar servidor automáticamente (opcional)
+## Comandos utiles
 
-Para que el servidor de captura arranque solo al iniciar Windows:
+```bash
+# Ver logs en tiempo real
+docker logs -f prtg-capture
 
-1. Abrir **Task Scheduler** (`taskschd.msc`)
-2. **Create Basic Task** → nombre: `PRTG Capture Server`
-3. **Trigger**: When I log on
-4. **Action**: Start a program
-   - Program: `python`
-   - Arguments: `C:\scripts\capture-server.py`
-5. Finalizar y guardar
+# Reiniciar contenedor
+docker compose restart
+
+# Detener
+docker compose down
+
+# Reconstruir (tras cambios en capture-server.py)
+docker compose up -d --build
+```
 
 ---
 
 ## Troubleshooting
 
-| Problema | Solución |
+| Problema | Solucion |
 |----------|----------|
-| `/bin/sh: powershell: not found` | El workflow usa HTTP Request, no Execute Command |
-| Ventana no encontrada | Verificar que RDP esté abierto con la VM |
-| Captura negra | La ventana RDP no está en pantalla, hacerla visible |
+| `ERR_CONNECTION_REFUSED` | PRTG no accesible desde el contenedor, verificar red |
+| `net::ERR_CERT` | SSL self-signed, ya se ignora automaticamente |
+| Login falla | Verificar selectores del form de login en `do_login()` en `capture-server.py` |
+| Captura vacia o negra | PRTG puede requerir mas tiempo, ajustar `page.wait_for_timeout()` |
 | Telegram no llega | Verificar Bot Token y Chat ID en la credencial de n8n |
-| Puerto 8080 ocupado | Cambiar puerto en `capture-server.py` y en el workflow |
-| `Access Denied` en HttpListener | Usar Python (no PowerShell) como servidor |
+| Puerto 8080 ocupado | Cambiar `SERVER_PORT` en `.env` y el puerto en `docker-compose.yml` |
+| `pip: not found` en build | Verificar que el Dockerfile use `python:3.12-slim` como base |
+| Contenedor se reinicia | Revisar logs con `docker logs prtg-capture` |

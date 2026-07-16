@@ -1,65 +1,132 @@
-import win32gui
-import win32ui
-import win32con
-from PIL import Image
+import os
+import io
+import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
-import io
-import ctypes
-import ctypes.wintypes
-import datetime
+from dotenv import load_dotenv
+from playwright.sync_api import sync_playwright
 
-def find_window(title):
-    result = []
-    def callback(hwnd, _):
-        if win32gui.IsWindowVisible(hwnd):
-            window_title = win32gui.GetWindowText(hwnd)
-            if title.lower() in window_title.lower():
-                result.append((hwnd, window_title))
-    win32gui.EnumWindows(callback, None)
-    return result[0] if result else None
+load_dotenv()
 
-def capture_window(hwnd):
-    left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-    w = right - left
-    h = bottom - top
-    if w <= 0 or h <= 0:
-        print(f"  Dimensiones invalidas: {w}x{h}")
-        return None
+PRTG_URL = os.getenv("PRTG_URL", "https://186.10.70.44/sensors.htm?id=0&filter_status=5")
+PRTG_LOGIN_URL = os.getenv("PRTG_LOGIN_URL", "https://186.10.70.44/index.htm")
+PRTG_USER = os.getenv("PRTG_USER", "")
+PRTG_PASS = os.getenv("PRTG_PASS", "")
+SERVER_PORT = int(os.getenv("SERVER_PORT", "8080"))
+SCREENSHOT_WIDTH = int(os.getenv("SCREENSHOT_WIDTH", "1920"))
+SCREENSHOT_HEIGHT = int(os.getenv("SCREENSHOT_HEIGHT", "1080"))
 
-    # Usar GetDC(0) = pantalla completa y BitBlt de la region
-    try:
-        screenDC = win32gui.GetDC(0)
-        mfcDC = win32ui.CreateDCFromHandle(screenDC)
-        saveDC = mfcDC.CreateCompatibleDC()
 
-        saveBitMap = win32ui.CreateBitmap()
-        saveBitMap.CreateCompatibleBitmap(mfcDC, w, h)
-        saveDC.SelectObject(saveBitMap)
+def do_login(page):
+    if not PRTG_USER or not PRTG_PASS:
+        return
 
-        # BitBlt copia la region de la pantalla
-        saveDC.BitBlt((0, 0), (w, h), mfcDC, (left, top), win32con.SRCCOPY)
+    print(f"  Login en {PRTG_LOGIN_URL}...")
+    page.goto(PRTG_LOGIN_URL, wait_until="networkidle", timeout=30000)
 
-        bmpinfo = saveBitMap.GetInfo()
-        bmpstr = saveBitMap.GetBitmapBits(True)
+    # PRTG login form — intentar selectores comunes
+    user_selectors = [
+        'input[name="name"]',
+        'input[name="username"]',
+        'input#name',
+        'input[type="text"]',
+    ]
+    pass_selectors = [
+        'input[name="password"]',
+        'input[name="pass"]',
+        'input#password',
+        'input[type="password"]',
+    ]
+    btn_selectors = [
+        'input[type="submit"]',
+        'button[type="submit"]',
+        'button:has-text("Login")',
+        'button:has-text("Iniciar")',
+        'button:has-text("Sign in")',
+        '#loginbutton',
+    ]
 
-        img = Image.frombuffer("RGBX", (bmpinfo["bmWidth"], bmpinfo["bmHeight"]), bmpstr, "raw", "BGRX")
-        img = img.convert("RGB")
+    user_input = None
+    for sel in user_selectors:
+        el = page.query_selector(sel)
+        if el:
+            user_input = el
+            break
 
-        win32gui.DeleteObject(saveBitMap.GetHandle())
-        saveDC.DeleteDC()
-        mfcDC.DeleteDC()
-        win32gui.ReleaseDC(0, screenDC)
+    pass_input = None
+    for sel in pass_selectors:
+        el = page.query_selector(sel)
+        if el:
+            pass_input = el
+            break
 
-        return img
-    except Exception as e:
-        print(f"  BitBlt fallo: {e}")
+    login_btn = None
+    for sel in btn_selectors:
+        el = page.query_selector(sel)
+        if el:
+            login_btn = el
+            break
+
+    if not user_input or not pass_input:
+        print("  WARNING: No se encontraron campos de login, continuando sin auth")
+        return
+
+    user_input.fill(PRTG_USER)
+    pass_input.fill(PRTG_PASS)
+
+    if login_btn:
+        login_btn.click()
+    else:
+        pass_input.press("Enter")
+
+    page.wait_for_load_state("networkidle", timeout=15000)
+    print("  Login completado")
+
+
+def take_screenshot(target_url=None):
+    url = target_url or PRTG_URL
+    ts = datetime.datetime.now().strftime("%H:%M:%S")
+    print(f"[{ts}] Capturando: {url}")
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--ignore-certificate-errors",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+            ],
+        )
+        context = browser.new_context(
+            viewport={"width": SCREENSHOT_WIDTH, "height": SCREENSHOT_HEIGHT},
+            ignore_https_errors=True,
+        )
+        page = context.new_page()
+
         try:
-            win32gui.ReleaseDC(0, screenDC)
-        except:
-            pass
+            do_login(page)
 
-    return None
+            print(f"  Navegando a {url}...")
+            page.goto(url, wait_until="networkidle", timeout=30000)
+
+            # Esperar que la tabla de sensores cargue
+            try:
+                page.wait_for_selector("table, .prtgtable, #doareapreview", timeout=10000)
+            except Exception:
+                print("  WARNING: Selector de tabla no encontrado, capturando como esta")
+
+            page.wait_for_timeout(2000)
+
+            screenshot_bytes = page.screenshot(full_page=True, type="png")
+            print(f"  OK - {len(screenshot_bytes)} bytes")
+            return screenshot_bytes
+
+        except Exception as e:
+            print(f"  ERROR - {e}")
+            raise
+        finally:
+            browser.close()
+
 
 class CaptureHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -67,42 +134,22 @@ class CaptureHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/capture":
             params = parse_qs(parsed.query)
-            window_title = params.get("window", ["Remote Desktop Manager"])[0]
+            target_url = params.get("url", [None])[0]
 
-            print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Capturando: {window_title}")
-
-            match = find_window(window_title)
-            if not match:
-                self.send_response(404)
-                self.send_header("Content-Type", "text/plain")
-                self.end_headers()
-                self.wfile.write(f"Ventana no encontrada: {window_title}".encode())
-                print(f"  ERROR - Ventana no encontrada")
-                return
-
-            hwnd, title = match
-            print(f"  Encontrada: {title} (hwnd={hwnd})")
-            img = capture_window(hwnd)
-
-            if img is None:
+            try:
+                data = take_screenshot(target_url)
+            except Exception as e:
                 self.send_response(500)
                 self.send_header("Content-Type", "text/plain")
                 self.end_headers()
-                self.wfile.write(b"Fallo al capturar la ventana")
-                print(f"  ERROR - Fallo al capturar")
+                self.wfile.write(f"Error al capturar: {e}".encode())
                 return
-
-            buf = io.BytesIO()
-            img.save(buf, format="PNG")
-            data = buf.getvalue()
 
             self.send_response(200)
             self.send_header("Content-Type", "image/png")
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
-
-            print(f"  OK - {len(data)} bytes")
 
         elif parsed.path == "/health":
             self.send_response(200)
@@ -117,11 +164,14 @@ class CaptureHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
+
 if __name__ == "__main__":
-    server = HTTPServer(("0.0.0.0", 8080), CaptureHandler)
-    print("Servidor de captura corriendo en http://localhost:8080/")
-    print("Endpoint: GET http://localhost:8080/capture?window=Remote%20Desktop%20Manager")
-    print("Health:   GET http://localhost:8080/health")
+    server = HTTPServer(("0.0.0.0", SERVER_PORT), CaptureHandler)
+    print(f"Servidor de captura corriendo en http://0.0.0.0:{SERVER_PORT}/")
+    print(f"Endpoint:  GET /capture")
+    print(f"Health:    GET /health")
+    print(f"PRTG URL:  {PRTG_URL}")
+    print(f"Viewport:  {SCREENSHOT_WIDTH}x{SCREENSHOT_HEIGHT}")
     print("Presiona Ctrl+C para detener")
     try:
         server.serve_forever()
